@@ -54,6 +54,14 @@ interface CheckInDao {
     @Query("SELECT * FROM check_ins ORDER BY date DESC, createdAt DESC")
     fun getAllCheckInsWithHabit(): Flow<List<CheckInWithHabit>>
 
+    /** 全量导出用的一次性快照。 */
+    @Query("SELECT * FROM check_ins ORDER BY id ASC")
+    suspend fun getAllCheckInsSync(): List<CheckIn>
+
+    /** 仅供备份恢复时清空表。 */
+    @Query("DELETE FROM check_ins")
+    suspend fun deleteAll()
+
     @Query("UPDATE check_ins SET photoPath = :photoPath WHERE habitId = :habitId AND date = :date")
     suspend fun updatePhotoPath(habitId: Long, date: String, photoPath: String?)
 }

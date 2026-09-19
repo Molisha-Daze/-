@@ -5,9 +5,11 @@ import com.example.habittracker.data.HabitDatabase
 import com.example.habittracker.data.dao.CheckInWithHabit
 import com.example.habittracker.data.entity.CheckIn
 import com.example.habittracker.data.entity.Habit
+import com.example.habittracker.data.entity.StandaloneCounter
 import com.example.habittracker.model.DayProgress
 import com.example.habittracker.model.HabitWithStats
 import com.example.habittracker.notification.NotificationHelper
+import com.example.habittracker.util.BackupCodec
 import com.example.habittracker.util.DateUtils
 import com.example.habittracker.util.HabitSchedule
 import com.example.habittracker.util.ImageStorageManager
@@ -19,6 +21,10 @@ class HabitRepository(private val context: Context) {
     private val db = HabitDatabase.getInstance(context)
     private val habitDao = db.habitDao()
     private val checkInDao = db.checkInDao()
+    private val counterDao = db.standaloneCounterDao()
+
+    /** 全部独立计数器，按最近更新排序。 */
+    val allStandaloneCounters: Flow<List<StandaloneCounter>> = counterDao.getAllCounters()
 
     val allHabits: Flow<List<Habit>> = habitDao.getAllActiveHabits()
 
@@ -262,4 +268,86 @@ class HabitRepository(private val context: Context) {
      */
     private fun canWrite(habit: Habit, date: String): Boolean =
         date <= DateUtils.today() && HabitSchedule.isScheduled(habit, date)
+
+    // ---------- 独立计数器 ----------
+    // 计数器是脱离排期的孤立实体，不参与 doze-redemption/热力图/连续天数，
+    // 因此这里没有 Habit 那一套 canWrite 校验。
+
+    suspend fun addCounter(counter: StandaloneCounter): Long = counterDao.insert(
+        counter.copy(
+            // 归一化：名称去空白、步长至少 1、单位兜底。
+            // 与网页版 AddEditCounterModal.handleSubmit 的规则保持一致。
+            name = counter.name.trim(),
+            unit = counter.unit.trim().ifBlank { "次" },
+            step = counter.step.coerceAtLeast(1),
+            currentCount = counter.currentCount.coerceAtLeast(0),
+            limitCount = if (counter.hasLimit) counter.limitCount?.coerceAtLeast(1) else null
+        )
+    )
+
+    suspend fun updateCounter(counter: StandaloneCounter) {
+        counterDao.update(
+            counter.copy(
+                name = counter.name.trim(),
+                unit = counter.unit.trim().ifBlank { "次" },
+                step = counter.step.coerceAtLeast(1),
+                currentCount = counter.currentCount.coerceAtLeast(0),
+                limitCount = if (counter.hasLimit) counter.limitCount?.coerceAtLeast(1) else null,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun deleteCounter(id: Long) {
+        counterDao.deleteById(id)
+    }
+
+    /**
+     * 按 [delta] 增减计数。
+     *
+     * 走 DAO 里的 SQL 原子累加而非"读出 + 改 + 写回"，避免快速连点时的丢更新。
+     * 下限由 SQL 的 MAX(0, ...) 保证；**上限不在此处拦截** —— 与网页版一致，
+     * 允许超过上限并由 UI 显示"已达上限"，这样记录「多喝了一罐」这类情况不会被吞掉。
+     */
+    suspend fun stepCounter(id: Long, delta: Int) {
+        counterDao.applyStep(id, delta)
+    }
+
+    /** 清零。 */
+    suspend fun resetCounter(id: Long) {
+        counterDao.setCount(id, 0)
+    }
+
+    // ---------- 备份与恢复 ----------
+
+    /** 生成完整备份 JSON（含已归档习惯）。 */
+    suspend fun exportBackupJson(): String = BackupCodec.exportToJson(
+        BackupCodec.BackupData(
+            habits = habitDao.getAllHabitsSync(),
+            checkIns = checkInDao.getAllCheckInsSync(),
+            counters = counterDao.getAllCountersSync()
+        )
+    )
+
+    /**
+     * 用备份文件**覆盖式**恢复当前数据。
+     *
+     * 为什么是覆盖而不是合并：习惯 id 与打卡记录通过外键绑定，局部合并很容易
+     * 出现同一习惯两套 id 的冲突，用户很难预期结果。明确告诉用户"会覆盖"更安全。
+     *
+     * 顺序不可调换：
+     * 1. 先清 check_ins 再清 habits（habits 的删除会 CASCADE 到 check_ins，显式清理避免歧义）；
+     * 2. 写入时先 habits 后 check_ins —— Room 在事务里开启了 `foreign_keys=ON`，
+     *    check_ins.habitId 引用不存在的 habit 会直接抛 FOREIGN KEY constraint failed。
+     */
+    suspend fun importBackupJson(json: String) {
+        val data = BackupCodec.parse(json)
+        checkInDao.deleteAll()
+        habitDao.deleteAll()
+        counterDao.deleteAll()
+
+        data.habits.forEach { habitDao.insert(it) }
+        data.checkIns.forEach { checkInDao.insert(it) }
+        data.counters.forEach { counterDao.insert(it) }
+    }
 }

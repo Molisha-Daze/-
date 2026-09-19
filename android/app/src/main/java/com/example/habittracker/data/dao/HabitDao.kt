@@ -40,6 +40,17 @@ interface HabitDao {
     @Query("DELETE FROM habits WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    /**
+     * 全量导出用：**包含已归档**的习惯，否则备份会丢数据。
+     * 注意与 [getAllActiveHabitsList] 区分，后者是给界面用的。
+     */
+    @Query("SELECT * FROM habits ORDER BY id ASC")
+    suspend fun getAllHabitsSync(): List<Habit>
+
+    /** 仅供备份恢复时清空表。会级联删除 check_ins（外键 onDelete = CASCADE）。 */
+    @Query("DELETE FROM habits")
+    suspend fun deleteAll()
+
     @Query("UPDATE habits SET sortOrder = :order WHERE id = :id")
     suspend fun updateSortOrder(id: Long, order: Int)
 }

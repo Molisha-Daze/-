@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.habittracker.data.dao.CheckInWithHabit
 import com.example.habittracker.data.entity.CheckIn
 import com.example.habittracker.data.entity.Habit
+import com.example.habittracker.data.entity.StandaloneCounter
 import com.example.habittracker.data.repository.HabitRepository
 import com.example.habittracker.model.DayProgress
 import com.example.habittracker.model.HabitWithStats
@@ -53,6 +54,13 @@ class HabitViewModel(private val repository: HabitRepository) : ViewModel() {
         )
 
     val heatMapProgress: StateFlow<List<DayProgress>> = repository.getHeatMapProgress(35)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val standaloneCounters: StateFlow<List<StandaloneCounter>> = repository.allStandaloneCounters
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -137,6 +145,50 @@ class HabitViewModel(private val repository: HabitRepository) : ViewModel() {
                 current.add(toIndex, item)
                 repository.updateHabitOrder(current)
             }
+        }
+    }
+
+    // ---------- 独立计数器 ----------
+
+    fun addCounter(counter: StandaloneCounter) {
+        viewModelScope.launch {
+            repository.addCounter(counter)
+        }
+    }
+
+    fun updateCounter(counter: StandaloneCounter) {
+        viewModelScope.launch {
+            repository.updateCounter(counter)
+        }
+    }
+
+    fun deleteCounter(id: Long) {
+        viewModelScope.launch {
+            repository.deleteCounter(id)
+        }
+    }
+
+    /** 增减计数。UI 传入的已经是带符号的步长（如 -step / +step）。 */
+    fun stepCounter(id: Long, delta: Int) {
+        viewModelScope.launch {
+            repository.stepCounter(id, delta)
+        }
+    }
+
+    fun resetCounter(id: Long) {
+        viewModelScope.launch {
+            repository.resetCounter(id)
+        }
+    }
+
+    // ---------- 备份与恢复 ----------
+
+    /** 生成备份 JSON 字符串。由调用方负责写入目标 Uri。 */
+    suspend fun exportBackupJson(): String = repository.exportBackupJson()
+
+    fun importBackupJson(json: String) {
+        viewModelScope.launch {
+            repository.importBackupJson(json)
         }
     }
 }

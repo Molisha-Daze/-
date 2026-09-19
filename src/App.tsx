@@ -33,13 +33,11 @@ import { StandaloneCountersView } from './components/StandaloneCountersView';
 import { AddEditCounterModal } from './components/AddEditCounterModal';
 import { PhotoViewerModal } from './components/PhotoViewerModal';
 import { NotificationBanner } from './components/NotificationBanner';
-import { CodeViewerModal } from './components/CodeViewerModal';
 import { AcceptanceTestModal } from './components/AcceptanceTestModal';
 import { FontSizeModal, FontSizeOption } from './components/FontSizeModal';
 import { AboutModal } from './components/AboutModal';
 import { DataBackupModal } from './components/DataBackupModal';
 import { NotificationSettingsModal } from './components/NotificationSettingsModal';
-import { InstallApkModal } from './components/InstallApkModal';
 import { clearAllAndResetDefaults } from './services/db';
 import {
   CheckCircle2,
@@ -83,7 +81,6 @@ export default function App() {
   const [showCounterModal, setShowCounterModal] = useState(false);
   const [editingCounter, setEditingCounter] = useState<StandaloneCounter | null>(null);
   const [viewingPhotoUrl, setViewingPhotoUrl] = useState<string | null>(null);
-  const [showCodeModal, setShowCodeModal] = useState(false);
   const [showAcceptanceModal, setShowAcceptanceModal] = useState(false);
   const [detailDate, setDetailDate] = useState<string | null>(null);
 
@@ -92,7 +89,6 @@ export default function App() {
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [showNotificationSettingsModal, setShowNotificationSettingsModal] = useState(false);
-  const [showInstallApkModal, setShowInstallApkModal] = useState(false);
 
   // Software Font Size
   const [fontSize, setFontSize] = useState<FontSizeOption>(() => {
@@ -435,26 +431,6 @@ export default function App() {
 
           <div className="flex items-center gap-2">
             <button
-              id="install-apk-btn"
-              onClick={() => setShowInstallApkModal(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 text-xs font-semibold transition-colors border border-emerald-500/20"
-              title="手机安装与导出 APK (v0.0.1)"
-            >
-              <Smartphone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>手机安装 & APK</span>
-            </button>
-
-            <button
-              id="view-code-btn"
-              onClick={() => setShowCodeModal(true)}
-              className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-xs font-semibold transition-colors text-zinc-600 dark:text-zinc-300"
-              title="查看 Android 完整工程源码 & 导出 ZIP"
-            >
-              <Code className="w-3.5 h-3.5 text-emerald-500" />
-              <span>安卓源码</span>
-            </button>
-
-            <button
               id="acceptance-test-btn"
               onClick={() => setShowAcceptanceModal(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold transition-colors"
@@ -705,30 +681,6 @@ export default function App() {
                     <span className="text-[10px] text-zinc-400 mt-0.5">
                       声音通知
                     </span>
-                  </button>
-                </div>
-
-                {/* 手机安装与导出 APK 快捷入口 */}
-                <div className="flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-blue-500/10 border border-emerald-500/20 shadow-2xs">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-                      <Smartphone className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">手机安装与导出 APK</span>
-                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">v0.0.1</span>
-                      </div>
-                      <p className="text-[10px] text-zinc-500 dark:text-zinc-400">支持一键免编译安装到桌面，或导出完整 Android Studio 原生工程</p>
-                    </div>
-                  </div>
-                  <button
-                    id="manage-open-install-apk-btn"
-                    type="button"
-                    onClick={() => setShowInstallApkModal(true)}
-                    className="shrink-0 ml-2 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
-                  >
-                    查看与安装
                   </button>
                 </div>
 
@@ -1049,11 +1001,6 @@ export default function App() {
         />
       )}
 
-      {/* Code Viewer & Project Zip Exporter Modal */}
-      {showCodeModal && (
-        <CodeViewerModal onClose={() => setShowCodeModal(false)} />
-      )}
-
       {/* Acceptance Test Modal */}
       {showAcceptanceModal && (
         <AcceptanceTestModal
@@ -1075,7 +1022,6 @@ export default function App() {
       {showAboutModal && (
         <AboutModal
           onClose={() => setShowAboutModal(false)}
-          onOpenInstallApk={() => setShowInstallApkModal(true)}
         />
       )}
 
@@ -1099,12 +1045,6 @@ export default function App() {
         />
       )}
 
-      {/* Install App on Phone & Export Android APK Modal */}
-      {showInstallApkModal && (
-        <InstallApkModal
-          onClose={() => setShowInstallApkModal(false)}
-        />
-      )}
     </div>
   );
 }

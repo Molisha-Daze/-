@@ -1,12 +1,11 @@
 import React from 'react';
-import { X, Sparkles, CheckCircle2, ShieldCheck, Heart, Smartphone, Download } from 'lucide-react';
+import { X, Sparkles, CheckCircle2, ShieldCheck, Heart, Smartphone } from 'lucide-react';
 
 interface AboutModalProps {
   onClose: () => void;
-  onOpenInstallApk?: () => void;
 }
 
-export const AboutModal: React.FC<AboutModalProps> = ({ onClose, onOpenInstallApk }) => {
+export const AboutModal: React.FC<AboutModalProps> = ({ onClose }) => {
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -87,19 +86,6 @@ export const AboutModal: React.FC<AboutModalProps> = ({ onClose, onOpenInstallAp
             <Heart className="w-3 h-3 fill-rose-500 text-rose-500 inline" />
           </div>
 
-          {onOpenInstallApk && (
-            <button
-              id="about-open-install-apk-btn"
-              onClick={() => {
-                onClose();
-                onOpenInstallApk();
-              }}
-              className="w-full py-2.5 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>在手机上安装或导出 APK (v0.0.1)</span>
-            </button>
-          )}
         </div>
 
         {/* Footer */}

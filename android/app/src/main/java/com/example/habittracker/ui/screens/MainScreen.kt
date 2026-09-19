@@ -19,7 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.habittracker.ui.components.notificationSettingsIntent
+import com.example.habittracker.util.AppSettings
 import com.example.habittracker.viewmodel.HabitViewModel
 
 private fun isNotificationGranted(context: Context): Boolean =
@@ -53,10 +56,14 @@ private fun isNotificationGranted(context: Context): Boolean =
     }
 
 @Composable
-fun MainScreen(viewModel: HabitViewModel) {
+fun MainScreen(viewModel: HabitViewModel, settings: AppSettings) {
     val context = LocalContext.current
     var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
     var notificationDenied by rememberSaveable { mutableStateOf(false) }
+
+    // 字号偏好。变更会即时反映到这里，进而更新「管理中心」里RadioButton的选中态；
+    // 真正作用到排版是在 MainActivity 的 LocalDensity 里。
+    val fontScale by settings.fontScale.collectAsState(initial = AppSettings.DEFAULT_FONT_SCALE)
 
     // Android 13+ (API 33+) Runtime Notification Permission Request。
     // 回调结果必须被消费：被拒绝时要明确告诉用户去哪里开，而不是静默失效。
@@ -98,8 +105,14 @@ fun MainScreen(viewModel: HabitViewModel) {
                 NavigationBarItem(
                     selected = selectedTabIndex == 2,
                     onClick = { selectedTabIndex = 2 },
-                    icon = { Icon(Icons.Default.Tune, contentDescription = "习惯管理") },
-                    label = { Text("习惯管理", style = MaterialTheme.typography.labelMedium) }
+                    icon = { Icon(Icons.Default.Tag, contentDescription = "独立计数器") },
+                    label = { Text("计数器", style = MaterialTheme.typography.labelMedium) }
+                )
+                NavigationBarItem(
+                    selected = selectedTabIndex == 3,
+                    onClick = { selectedTabIndex = 3 },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "管理中心") },
+                    label = { Text("管理中心", style = MaterialTheme.typography.labelMedium) }
                 )
             }
         }
@@ -144,7 +157,12 @@ fun MainScreen(viewModel: HabitViewModel) {
                 when (selectedTabIndex) {
                     0 -> TodayScreen(viewModel = viewModel)
                     1 -> HistoryScreen(viewModel = viewModel)
-                    2 -> HabitsManageScreen(viewModel = viewModel)
+                    2 -> StandaloneCountersScreen(viewModel = viewModel)
+                    3 -> SettingsScreen(
+                        viewModel = viewModel,
+                        settings = settings,
+                        currentFontScale = fontScale
+                    )
                 }
             }
         }
