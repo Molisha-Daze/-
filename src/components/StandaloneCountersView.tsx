@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { StandaloneCounter } from '../types';
 import {
   Hash,
@@ -6,9 +6,7 @@ import {
   Minus,
   RotateCcw,
   Edit2,
-  Trash2,
-  Sparkles,
-  Info
+  Trash2
 } from 'lucide-react';
 
 interface StandaloneCountersViewProps {
@@ -17,7 +15,7 @@ interface StandaloneCountersViewProps {
   onEditCounter: (counter: StandaloneCounter) => void;
   onDeleteCounter: (id: number) => void;
   onStepCounter: (id: number, delta: number) => void;
-  onResetCounter: (id: number) => void;
+  onResetCounter: (id: number, skipConfirmation?: boolean) => void;
 }
 
 export const StandaloneCountersView: React.FC<StandaloneCountersViewProps> = ({
@@ -28,6 +26,24 @@ export const StandaloneCountersView: React.FC<StandaloneCountersViewProps> = ({
   onStepCounter,
   onResetCounter
 }) => {
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didLongPressRef = useRef(false);
+
+  const beginResetPress = (id: number) => {
+    didLongPressRef.current = false;
+    resetTimerRef.current = setTimeout(() => {
+      didLongPressRef.current = true;
+      onResetCounter(id, true);
+    }, 650);
+  };
+
+  const cancelResetPress = () => {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Top Banner / Introduction */}
@@ -112,9 +128,17 @@ export const StandaloneCountersView: React.FC<StandaloneCountersViewProps> = ({
                     {/* Action buttons */}
                     <div className="flex items-center gap-1 shrink-0">
                       <button
-                        onClick={() => onResetCounter(counter.id)}
+                        onPointerDown={() => beginResetPress(counter.id)}
+                        onPointerUp={cancelResetPress}
+                        onPointerLeave={cancelResetPress}
+                        onPointerCancel={cancelResetPress}
+                        onClick={() => {
+                          if (!didLongPressRef.current) onResetCounter(counter.id);
+                          didLongPressRef.current = false;
+                        }}
                         className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                        title="数值清零"
+                        title="点击确认清零，或长按 0.65 秒清零"
+                        aria-label={`将${counter.name}清零`}
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                       </button>
@@ -159,16 +183,21 @@ export const StandaloneCountersView: React.FC<StandaloneCountersViewProps> = ({
                     )}
                   </div>
 
-                  {/* Progress bar if has limit */}
+                  {/* Progress indicator if has limit */}
                   {hasLimit && (
-                    <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full mt-1.5 overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-300"
-                        style={{
-                          width: `${progressRatio * 100}%`,
-                          backgroundColor: counter.colorHex
-                        }}
-                      />
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-300"
+                          style={{
+                            width: `${progressRatio * 100}%`,
+                            backgroundColor: counter.colorHex
+                          }}
+                        />
+                      </div>
+                      <span className="text-[10px] tabular-nums font-semibold text-zinc-400 shrink-0">
+                        {Math.round(progressRatio * 100)}%
+                      </span>
                     </div>
                   )}
                 </div>

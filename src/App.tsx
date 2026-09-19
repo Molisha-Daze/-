@@ -231,8 +231,8 @@ export default function App() {
     setCounters(updated);
   };
 
-  const handleResetCounter = async (id: number) => {
-    if (window.confirm('确定要将该独立计数器重置为 0 吗？')) {
+  const handleResetCounter = async (id: number, skipConfirmation = false) => {
+    if (skipConfirmation || window.confirm('确定要将该独立计数器重置为 0 吗？')) {
       await resetCounter(id, 0);
       const updated = await loadAllCounters();
       setCounters(updated);
@@ -624,16 +624,16 @@ export default function App() {
               />
             )}
 
-            {/* TAB 4: 软件管理 (Software & Plan Management) */}
+            {/* TAB 4: 管理中心 (Settings & plan management) */}
             {activeTab === 'manage' && (
               <div className="space-y-4">
                 <div>
                   <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">
-                    软件管理
+                    管理中心
                   </h2>
                 </div>
 
-                {/* 1x4 软件管理功能金刚区 (1x4 Feature Icons Grid) */}
+                {/* 1x4 管理中心功能金刚区 (1x4 Feature Icons Grid) */}
                 <div className="grid grid-cols-4 gap-2 sm:gap-3 bg-white dark:bg-zinc-900/90 p-2.5 sm:p-3 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-xs">
                   {/* Icon 1: 设置字号 */}
                   <button
@@ -970,7 +970,7 @@ export default function App() {
               >
                 <Sliders className="w-5 h-5" />
               </div>
-              <span className="text-[11px]">软件管理</span>
+              <span className="text-[11px]">管理中心</span>
             </button>
           </nav>
         </div>
