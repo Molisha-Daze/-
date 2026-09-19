@@ -20,7 +20,15 @@ interface HabitDao {
     @Query("SELECT * FROM habits WHERE id = :id LIMIT 1")
     suspend fun getHabitById(id: Long): Habit?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    /**
+     * 新增习惯。
+     *
+     * 注意：这里必须用 IGNORE 而不是 REPLACE。REPLACE 的 SQLite 语义是「先删后插」，
+     * 而 check_ins 对 habits 有 ForeignKey(onDelete = CASCADE)，一旦有人误把已存在的
+     * habit 传进来，会连带把该习惯的全部打卡记录删掉。
+     * 更新一律走 [update]。
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(habit: Habit): Long
 
     @Update

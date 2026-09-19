@@ -50,6 +50,8 @@ import com.example.habittracker.data.entity.Habit
 import com.example.habittracker.ui.components.AddEditHabitDialog
 import com.example.habittracker.ui.components.EmptyState
 import com.example.habittracker.ui.components.getIconVector
+import com.example.habittracker.ui.components.scheduleLabel
+import com.example.habittracker.util.HabitSchedule
 import com.example.habittracker.viewmodel.HabitViewModel
 
 @Composable
@@ -151,6 +153,14 @@ fun HabitsManageScreen(
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = if (habit.isCounter)
+                                            "${scheduleLabel(habit)} · 目标 ${HabitSchedule.effectiveTarget(habit)} ${habit.unit}"
+                                        else scheduleLabel(habit),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                     if (habit.reminderTime != null) {
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -229,15 +239,9 @@ fun HabitsManageScreen(
                 AddEditHabitDialog(
                     initialHabit = habit,
                     onDismiss = { editingHabit = null },
-                    onSave = { name, icon, color, reminder ->
-                        viewModel.updateHabit(
-                            habit.copy(
-                                name = name,
-                                iconName = icon,
-                                colorHex = color,
-                                reminderTime = reminder
-                            )
-                        )
+                    onSave = { updated ->
+                        // 弹窗回传的是完整 Habit（含 id 与 sortOrder），直接整体更新
+                        viewModel.updateHabit(updated)
                         editingHabit = null
                     }
                 )
@@ -247,9 +251,7 @@ fun HabitsManageScreen(
             if (showAddDialog) {
                 AddEditHabitDialog(
                     onDismiss = { showAddDialog = false },
-                    onSave = { name, icon, color, reminder ->
-                        viewModel.addHabit(name, icon, color, reminder)
-                    }
+                    onSave = { habit -> viewModel.addHabit(habit) }
                 )
             }
 

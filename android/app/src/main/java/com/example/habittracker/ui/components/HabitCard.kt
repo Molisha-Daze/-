@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CameraAlt
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.LocalDrink
 import androidx.compose.material.icons.filled.Nightlight
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.SelfImprovement
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.LocalFireDepartment
@@ -52,13 +54,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.habittracker.data.entity.Habit
 import com.example.habittracker.model.HabitWithStats
+import com.example.habittracker.util.HabitSchedule
 import java.io.File
 
 @Composable
 fun HabitCard(
     item: HabitWithStats,
     onToggleCheckIn: () -> Unit,
+    onIncrement: () -> Unit,
+    onDecrement: () -> Unit,
     onPhotoSelected: (android.net.Uri) -> Unit,
     onPhotoClick: (String) -> Unit,
     onRemovePhoto: () -> Unit,
@@ -68,6 +74,8 @@ fun HabitCard(
     val habit = item.habit
     val isCompleted = item.isCompletedToday
     val photoPath = item.todayCheckIn?.photoPath
+    val count = HabitSchedule.currentCount(item.todayCheckIn)
+    val target = HabitSchedule.effectiveTarget(habit)
 
     // Android Photo Picker launcher (compatible down to Android 10 without storage permission)
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -158,6 +166,16 @@ fun HabitCard(
                         )
                     }
 
+                    // 非每日习惯要说明排期，否则用户会奇怪「它怎么有时不出现」
+                    if (habit.recurrenceType != HabitSchedule.TYPE_DAILY) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = scheduleLabel(habit),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     if (habit.reminderTime != null) {
                         Spacer(modifier = Modifier.height(2.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -179,28 +197,77 @@ fun HabitCard(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Toggle Check-in Button
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(if (isCompleted) habitColor else habitColor.copy(alpha = 0.12f))
-                        .clickable { onToggleCheckIn() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isCompleted) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "取消打卡",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(20.dp)
-                                .border(2.dp, habitColor, CircleShape)
-                        )
+                if (habit.isCounter) {
+                    // 计数器习惯：用 -/+ 累计，达到目标次数才算完成。
+                    // 早先只有「有/无」两种状态，导致目标为 3 杯的习惯在 App 里永远无法完成。
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = onDecrement,
+                            enabled = count > 0,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Remove,
+                                contentDescription = "减一次",
+                                tint = if (count > 0) habitColor else MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(horizontal = 2.dp)
+                        ) {
+                            Text(
+                                text = "$count/$target",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isCompleted) habitColor else MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = habit.unit,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onIncrement,
+                            enabled = count < target,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = "加一次",
+                                tint = if (count < target) habitColor else MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                } else {
+                    // Toggle Check-in Button
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(if (isCompleted) habitColor else habitColor.copy(alpha = 0.12f))
+                            .clickable { onToggleCheckIn() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isCompleted) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "取消打卡",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .border(2.dp, habitColor, CircleShape)
+                            )
+                        }
                     }
                 }
             }
@@ -276,6 +343,22 @@ fun HabitCard(
             }
         }
     }
+}
+
+private val WEEKDAY_CN = mapOf(1 to "一", 2 to "二", 3 to "三", 4 to "四", 5 to "五", 6 to "六", 7 to "日")
+
+fun scheduleLabel(habit: Habit): String = when (habit.recurrenceType) {
+    HabitSchedule.TYPE_NONE -> if (habit.startDate.isBlank()) "单次" else "仅 ${habit.startDate}"
+    HabitSchedule.TYPE_WEEKLY -> {
+        val days = HabitSchedule.parseWeeklyDays(habit.weeklyDays)
+        if (days.isEmpty()) "每周" else "每周 " + days.sorted().joinToString("、") { WEEKDAY_CN[it] ?: "" }
+    }
+    HabitSchedule.TYPE_MONTHLY -> {
+        val days = HabitSchedule.parseMonthlyDays(habit.monthlyDays)
+        if (days.isEmpty()) "每月" else "每月 ${days.sorted().joinToString("、")} 日"
+    }
+    HabitSchedule.TYPE_INTERVAL -> "每 ${habit.intervalDays.coerceAtLeast(1)} 天"
+    else -> "每天"
 }
 
 fun getIconVector(iconName: String): ImageVector {

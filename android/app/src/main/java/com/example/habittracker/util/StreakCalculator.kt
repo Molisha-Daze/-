@@ -22,7 +22,9 @@ object StreakCalculator {
             return StreakResult(currentStreak = 0, longestStreak = 0)
         }
 
-        // Convert and sort all dates
+        // Convert and sort all dates.
+        // 必须剔除未来日期：一旦写入「提前完成」的记录，longestStreak 会把未来那一段
+        // 也算进去，产出「连续打卡 47 天」这种荒谬数据。
         val localDates = checkInDates
             .mapNotNull {
                 try {
@@ -31,6 +33,7 @@ object StreakCalculator {
                     null
                 }
             }
+            .filter { it <= referenceToday }
             .distinct()
             .sorted()
 

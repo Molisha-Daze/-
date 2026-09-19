@@ -5,6 +5,9 @@ import com.example.habittracker.data.entity.Habit
 
 data class HabitWithStats(
     val habit: Habit,
+    /** 今天是否有排期（由 HabitSchedule.isScheduled 判定，今日页据此过滤） */
+    val scheduledToday: Boolean = true,
+    /** 今天是否已完成（计数器习惯按 count >= targetCount 判定） */
     val isCompletedToday: Boolean,
     val todayCheckIn: CheckIn? = null,
     val currentStreak: Int = 0,

@@ -11,7 +11,6 @@ import androidx.core.app.NotificationCompat
 import com.example.habittracker.MainActivity
 import com.example.habittracker.R
 import com.example.habittracker.data.entity.Habit
-import com.example.habittracker.util.DateUtils
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -24,6 +23,17 @@ object NotificationHelper {
     const val EXTRA_HABIT_NAME = "extra_habit_name"
     const val EXTRA_REMINDER_TIME = "extra_reminder_time"
     const val ACTION_CHECK_IN = "com.example.habittracker.ACTION_CHECK_IN"
+
+    // PendingIntent requestCode 与通知 ID 一律从这里生成。
+    // 以前各文件裸写 habitId.toInt() / habitId.toInt() + 100000，改一处忘一处就会静默串台。
+    private const val REQ_ALARM = 1_000_000
+    private const val REQ_ACTION = 2_000_000
+    private const val REQ_CONTENT = 3_000_000
+
+    fun alarmRequestCode(habitId: Long): Int = REQ_ALARM + habitId.toInt()
+    fun actionRequestCode(habitId: Long): Int = REQ_ACTION + habitId.toInt()
+    fun contentRequestCode(habitId: Long): Int = REQ_CONTENT + habitId.toInt()
+    fun notificationId(habitId: Long): Int = habitId.toInt()
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -41,17 +51,32 @@ object NotificationHelper {
     }
 
     /**
-     * Schedules an exact daily alarm for a habit at the specified time (e.g. "08:30").
+     * 当前是否能使用精确闹钟。
+     *
+     * Android 12（API 31/32）的 SCHEDULE_EXACT_ALARM 默认授予，但用户可以在系统设置里关掉；
+     * Android 13+ 同理。返回 false 时提醒会降级为非精确，应当把这个状态告诉用户。
      */
-    fun scheduleDailyReminder(context: Context, habit: Habit) {
-        val reminderTime = habit.reminderTime ?: return
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+    fun canScheduleExactAlarms(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+        return alarmManager?.canScheduleExactAlarms() ?: false
+    }
 
-        try {
+    /**
+     * Schedules a daily alarm for a habit at the specified time (e.g. "08:30").
+     *
+     * @return 是否成功使用了**精确**闹钟；false 表示已降级为非精确（可能延迟数分钟），
+     *         调用方应当把这个状态反馈到界面上，而不是静默吞掉。
+     */
+    fun scheduleDailyReminder(context: Context, habit: Habit): Boolean {
+        val reminderTime = habit.reminderTime ?: return false
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return false
+
+        return try {
             val parts = reminderTime.split(":")
-            if (parts.size != 2) return
-            val hour = parts[0].toIntOrNull() ?: return
-            val minute = parts[1].toIntOrNull() ?: return
+            if (parts.size != 2) return false
+            val hour = parts[0].toIntOrNull() ?: return false
+            val minute = parts[1].toIntOrNull() ?: return false
 
             val now = LocalDateTime.now(ZoneId.systemDefault())
             var targetDateTime = LocalDateTime.of(LocalDate.now(), LocalTime.of(hour, minute, 0))
@@ -71,35 +96,29 @@ object NotificationHelper {
 
             val pendingIntent = PendingIntent.getBroadcast(
                 context,
-                habit.id.toInt(),
+                alarmRequestCode(habit.id),
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            // Use setExactAndAllowWhileIdle for exact timing
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (alarmManager.canScheduleExactAlarms()) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerMillis,
-                        pendingIntent
-                    )
-                } else {
-                    alarmManager.setAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerMillis,
-                        pendingIntent
-                    )
-                }
-            } else {
+            val useExact = canScheduleExactAlarms(context)
+            if (useExact) {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     triggerMillis,
                     pendingIntent
                 )
+            } else {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerMillis,
+                    pendingIntent
+                )
             }
+            useExact
         } catch (e: Exception) {
             e.printStackTrace()
+            false
         }
     }
 
@@ -111,7 +130,7 @@ object NotificationHelper {
         val intent = Intent(context, AlarmReceiver::class.java)
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            habitId.toInt(),
+            alarmRequestCode(habitId),
             intent,
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
         )
@@ -119,6 +138,12 @@ object NotificationHelper {
             alarmManager.cancel(pendingIntent)
             pendingIntent.cancel()
         }
+    }
+
+    /** 用户在 App 内完成打卡后，撤掉已经弹出来的那条提醒。 */
+    fun cancelNotification(context: Context, habitId: Long) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        manager?.cancel(notificationId(habitId))
     }
 
     /**
@@ -134,7 +159,7 @@ object NotificationHelper {
         }
         val contentPendingIntent = PendingIntent.getActivity(
             context,
-            habitId.toInt(),
+            contentRequestCode(habitId),
             contentIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -147,7 +172,7 @@ object NotificationHelper {
         }
         val checkInPendingIntent = PendingIntent.getBroadcast(
             context,
-            habitId.toInt() + 100000,
+            actionRequestCode(habitId),
             checkInIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -167,6 +192,6 @@ object NotificationHelper {
             .build()
 
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(habitId.toInt(), notification)
+        manager.notify(notificationId(habitId), notification)
     }
 }

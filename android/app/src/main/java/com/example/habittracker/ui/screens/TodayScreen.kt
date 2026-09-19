@@ -47,12 +47,13 @@ fun TodayScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val habitsWithStats by viewModel.habitsWithStats.collectAsState()
+    // 只显示今天真正有排期的习惯（「每周一三五」这类在没排期的日子不该出现）
+    val todayHabits by viewModel.todayHabits.collectAsState()
     var selectedPhotoPath by remember { mutableStateOf<String?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
 
-    val completedCount = habitsWithStats.count { it.isCompletedToday }
-    val totalCount = habitsWithStats.size
+    val completedCount = todayHabits.count { it.isCompletedToday }
+    val totalCount = todayHabits.size
     val progress = if (totalCount > 0) completedCount.toFloat() / totalCount else 0f
 
     Scaffold(
@@ -73,10 +74,11 @@ fun TodayScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (habitsWithStats.isEmpty()) {
+            if (todayHabits.isEmpty()) {
                 EmptyState(
-                    title = "还没有习惯项目",
-                    subtitle = "点击右下角 + 按钮，创建你的第一个好习惯吧！",
+                    title = "今天没有安排打卡计划",
+                    subtitle = "已有习惯今天不排期，或点击右下角 + 新建一个。",
+                    icon = Icons.Outlined.CheckCircle,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
@@ -142,12 +144,14 @@ fun TodayScreen(
 
                     // Habit list
                     items(
-                        items = habitsWithStats,
+                        items = todayHabits,
                         key = { it.habit.id }
                     ) { item ->
                         HabitCard(
                             item = item,
                             onToggleCheckIn = { viewModel.toggleCheckIn(item.habit.id) },
+                            onIncrement = { viewModel.incrementCheckIn(item.habit.id) },
+                            onDecrement = { viewModel.decrementCheckIn(item.habit.id) },
                             onPhotoSelected = { uri ->
                                 viewModel.attachPhotoFromUri(context, item.habit.id, uri)
                             },
@@ -170,9 +174,7 @@ fun TodayScreen(
             if (showAddDialog) {
                 AddEditHabitDialog(
                     onDismiss = { showAddDialog = false },
-                    onSave = { name, icon, color, reminder ->
-                        viewModel.addHabit(name, icon, color, reminder)
-                    }
+                    onSave = { habit -> viewModel.addHabit(habit) }
                 )
             }
         }

@@ -1,12 +1,12 @@
 package com.example.habittracker.notification
 
-import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.example.habittracker.data.HabitDatabase
 import com.example.habittracker.data.entity.CheckIn
 import com.example.habittracker.util.DateUtils
+import com.example.habittracker.util.HabitSchedule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -26,18 +26,27 @@ class CheckInActionReceiver : BroadcastReceiver() {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     val db = HabitDatabase.getInstance(context)
-                    val today = DateUtils.today()
-                    val habit = db.habitDao().getHabitById(habitId)
-                    val targetCount = habit?.targetCount ?: 1
-                    val isCounter = habit?.isCounter ?: false
 
+                    // 习惯可能已经被删除或归档。这里必须先判空再写库：
+                    // check_ins 对 habits 有 ForeignKey(onDelete = CASCADE)，
+                    // 往一个不存在的 habitId 上 insert 会直接抛 FOREIGN KEY constraint failed。
+                    val habit = db.habitDao().getHabitById(habitId)
+                    if (habit == null || habit.archived) {
+                        NotificationHelper.cancelNotification(context, habitId)
+                        NotificationHelper.cancelReminder(context, habitId)
+                        return@launch
+                    }
+
+                    val today = DateUtils.today()
                     val existing = db.checkInDao().getCheckIn(habitId, today)
+                    val target = if (habit.isCounter) HabitSchedule.effectiveTarget(habit) else 1
+
                     if (existing == null) {
                         db.checkInDao().insert(
                             CheckIn(
                                 habitId = habitId,
                                 date = today,
-                                count = if (isCounter) targetCount else 1,
+                                count = target,
                                 isCompleted = true,
                                 createdAt = System.currentTimeMillis()
                             )
@@ -45,14 +54,13 @@ class CheckInActionReceiver : BroadcastReceiver() {
                     } else {
                         db.checkInDao().update(
                             existing.copy(
-                                count = if (isCounter) targetCount else 1,
+                                count = maxOf(existing.count, target),
                                 isCompleted = true
                             )
                         )
                     }
-                    // Dismiss the notification directly
-                    val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                    manager.cancel(habitId.toInt())
+                    // Dismiss the notification
+                    NotificationHelper.cancelNotification(context, habitId)
                 } finally {
                     pendingResult.finish()
                 }

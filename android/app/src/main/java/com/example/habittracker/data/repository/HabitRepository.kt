@@ -9,11 +9,11 @@ import com.example.habittracker.model.DayProgress
 import com.example.habittracker.model.HabitWithStats
 import com.example.habittracker.notification.NotificationHelper
 import com.example.habittracker.util.DateUtils
+import com.example.habittracker.util.HabitSchedule
 import com.example.habittracker.util.ImageStorageManager
 import com.example.habittracker.util.StreakCalculator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
 
 class HabitRepository(private val context: Context) {
     private val db = HabitDatabase.getInstance(context)
@@ -22,11 +22,16 @@ class HabitRepository(private val context: Context) {
 
     val allHabits: Flow<List<Habit>> = habitDao.getAllActiveHabits()
 
+    val allCheckIns: Flow<List<CheckIn>> = checkInDao.getAllCheckIns()
+
     val allCheckInsWithHabits: Flow<List<CheckInWithHabit>> = checkInDao.getAllCheckInsWithHabit()
 
     /**
-     * Real-time computed habits with streak stats and today's check-in status.
-     * No redundant stats table is stored.
+     * 全部活跃习惯 + 连续打卡统计。
+     *
+     * 这里返回的是**所有**活跃习惯（含今天没有排期的），因为「习惯管理」页要列出全部；
+     * 今日页请用 [com.example.habittracker.viewmodel.HabitViewModel.todayHabits]，
+     * 它按 [HabitSchedule.isScheduled] 过滤出今天真正该做的。
      */
     val habitsWithStats: Flow<List<HabitWithStats>> = combine(
         habitDao.getAllActiveHabits(),
@@ -35,7 +40,6 @@ class HabitRepository(private val context: Context) {
         val todayStr = DateUtils.today()
         val todayDate = DateUtils.todayDate()
 
-        // Group check-ins by habitId
         val checkInsByHabit = allCheckIns.groupBy { it.habitId }
 
         habits.map { habit ->
@@ -47,7 +51,8 @@ class HabitRepository(private val context: Context) {
 
             HabitWithStats(
                 habit = habit,
-                isCompletedToday = todayCheckIn != null,
+                scheduledToday = HabitSchedule.isScheduled(habit, todayDate),
+                isCompletedToday = HabitSchedule.isCompleted(habit, todayCheckIn),
                 todayCheckIn = todayCheckIn,
                 currentStreak = streak.currentStreak,
                 longestStreak = streak.longestStreak,
@@ -57,7 +62,9 @@ class HabitRepository(private val context: Context) {
     }
 
     /**
-     * Computes completion ratio for recent days to power the Calendar Heat Map.
+     * 计算最近若干天的完成率，用于日历热力图。
+     * 分母是**当天有排期的习惯数**而不是全部活跃习惯数，
+     * 否则「每周一三五」这类习惯会把没排期的日子全部拉低成未完成。
      */
     fun getHeatMapProgress(daysCount: Int = 35): Flow<List<DayProgress>> = combine(
         habitDao.getAllActiveHabits(),
@@ -65,20 +72,22 @@ class HabitRepository(private val context: Context) {
     ) { habits, allCheckIns ->
         val dates = DateUtils.getRecentDates(daysCount)
         val checkInsByDate = allCheckIns.groupBy { it.date }
-        val totalActive = habits.size
 
         dates.map { date ->
             val dayCheckIns = checkInsByDate[date] ?: emptyList()
-            // Count unique habits checked in on that date that are still active
-            val activeHabitIds = habits.map { it.id }.toSet()
-            val validCheckIns = dayCheckIns.filter { activeHabitIds.contains(it.habitId) }
-            val count = validCheckIns.size
-            val ratio = if (totalActive > 0) (count.toFloat() / totalActive).coerceIn(0f, 1f) else 0f
+            val checkInByHabit = dayCheckIns.associateBy { it.habitId }
+
+            val scheduled = habits.filter { HabitSchedule.isScheduled(it, date) }
+            val completedCount = scheduled.count { habit ->
+                HabitSchedule.isCompleted(habit, checkInByHabit[habit.id])
+            }
+            val total = scheduled.size
+            val ratio = if (total > 0) (completedCount.toFloat() / total).coerceIn(0f, 1f) else 0f
 
             DayProgress(
                 date = date,
-                totalHabitsCount = totalActive,
-                completedCount = count,
+                totalHabitsCount = total,
+                completedCount = completedCount,
                 ratio = ratio,
                 checkIns = dayCheckIns
             )
@@ -105,6 +114,7 @@ class HabitRepository(private val context: Context) {
 
     suspend fun deleteHabit(habit: Habit) {
         NotificationHelper.cancelReminder(context, habit.id)
+        NotificationHelper.cancelNotification(context, habit.id)
         // clean up associated photos
         val checkIns = checkInDao.getCheckInsForHabitSync(habit.id)
         for (c in checkIns) {
@@ -119,10 +129,29 @@ class HabitRepository(private val context: Context) {
         }
     }
 
-    suspend fun toggleCheckIn(habitId: Long, date: String = DateUtils.today()): Boolean {
+    /**
+     * 打卡开关。普通习惯是「有记录则删除 / 无记录则新建」；
+     * 计数器习惯转发到 [incrementCheckIn]，点满目标后再点一次归零。
+     *
+     * @return 操作后是否处于「已完成」状态；未来日期或习惯不存在时返回 null。
+     */
+    suspend fun toggleCheckIn(habitId: Long, date: String = DateUtils.today()): Boolean? {
+        if (!isWritableDate(date)) return null
+        val habit = habitDao.getHabitById(habitId) ?: return null
+        if (habit.isCounter) {
+            val existing = checkInDao.getCheckIn(habitId, date)
+            return if (existing != null && existing.count >= HabitSchedule.effectiveTarget(habit)) {
+                ImageStorageManager.deleteImageFile(existing.photoPath)
+                checkInDao.deleteByHabitAndDate(habitId, date)
+                false
+            } else {
+                val next = incrementCheckIn(habitId, date) ?: return null
+                next >= HabitSchedule.effectiveTarget(habit)
+            }
+        }
+
         val existing = checkInDao.getCheckIn(habitId, date)
-        return if (existing != null) {
-            // Delete check in and clean photo
+        val nowCompleted = if (existing != null) {
             ImageStorageManager.deleteImageFile(existing.photoPath)
             checkInDao.deleteByHabitAndDate(habitId, date)
             false
@@ -131,14 +160,70 @@ class HabitRepository(private val context: Context) {
                 CheckIn(
                     habitId = habitId,
                     date = date,
+                    count = 1,
+                    isCompleted = true,
                     createdAt = System.currentTimeMillis()
                 )
             )
             true
         }
+        if (nowCompleted) NotificationHelper.cancelNotification(context, habitId)
+        return nowCompleted
+    }
+
+    /**
+     * 计数器习惯 +1，达到目标次数后置为完成。
+     * @return 操作后的当前次数；未来日期或习惯不存在时返回 null。
+     */
+    suspend fun incrementCheckIn(habitId: Long, date: String = DateUtils.today()): Int? {
+        if (!isWritableDate(date)) return null
+        val habit = habitDao.getHabitById(habitId) ?: return null
+
+        val target = HabitSchedule.effectiveTarget(habit)
+        val existing = checkInDao.getCheckIn(habitId, date)
+        val next = ((existing?.count ?: 0) + 1).coerceAtMost(if (habit.isCounter) target else 1)
+
+        if (existing == null) {
+            checkInDao.insert(
+                CheckIn(
+                    habitId = habitId,
+                    date = date,
+                    count = next,
+                    isCompleted = next >= target,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+        } else {
+            checkInDao.update(existing.copy(count = next, isCompleted = next >= target))
+        }
+        if (next >= target) NotificationHelper.cancelNotification(context, habitId)
+        return next
+    }
+
+    /**
+     * 计数器习惯 -1，减到 0 时删除整条打卡记录（连带清理照片）。
+     * @return 操作后的当前次数；未来日期或习惯不存在时返回 null。
+     */
+    suspend fun decrementCheckIn(habitId: Long, date: String = DateUtils.today()): Int? {
+        if (!isWritableDate(date)) return null
+        val habit = habitDao.getHabitById(habitId) ?: return null
+
+        val existing = checkInDao.getCheckIn(habitId, date) ?: return 0
+        val next = (existing.count - 1).coerceAtLeast(0)
+
+        if (next <= 0) {
+            ImageStorageManager.deleteImageFile(existing.photoPath)
+            checkInDao.deleteByHabitAndDate(habitId, date)
+        } else {
+            checkInDao.update(
+                existing.copy(count = next, isCompleted = next >= HabitSchedule.effectiveTarget(habit))
+            )
+        }
+        return next
     }
 
     suspend fun attachPhoto(habitId: Long, date: String, photoPath: String) {
+        if (!isWritableDate(date)) return
         val existing = checkInDao.getCheckIn(habitId, date)
         if (existing != null) {
             // Remove previous photo if different
@@ -166,4 +251,7 @@ class HabitRepository(private val context: Context) {
             checkInDao.updatePhotoPath(habitId, date, null)
         }
     }
+
+    /** 不允许为未来日期写入打卡记录——这是数据层的最后一道防线。 */
+    private fun isWritableDate(date: String): Boolean = date <= DateUtils.today()
 }

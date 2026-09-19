@@ -19,7 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -44,31 +45,42 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.habittracker.data.entity.CheckIn
 import com.example.habittracker.data.entity.Habit
-import com.example.habittracker.util.DateUtils
-import java.time.DayOfWeek
+import com.example.habittracker.util.HabitSchedule
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 /**
  * 细化月视图日历网格组件 (Compose):
  * 1. 周一为每周第一天
- * 2. 顶部月份切换 (< 2026年3月 >)
+ * 2. 顶部月份切换，但不允许翻到未来月份
  * 3. 每个日期格显示日期数字，若当天有排期计划，下方显示小圆点（全完成=实心绿点，未完成=空心灰点）
  * 4. 点击日期选中，下方实时联动显示该日期的计划列表，带勾选框与删除线效果
+ * 5. 未来日期一律只读，不允许「提前完成」
  */
 @Composable
 fun CalendarMonthView(
     habits: List<Habit>,
     checkIns: List<CheckIn>,
     onToggleCheckIn: (habitId: Long, date: String) -> Unit,
+    onIncrement: (habitId: Long, date: String) -> Unit,
+    onDecrement: (habitId: Long, date: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var currentMonth by remember { mutableStateOf(YearMonth.now()) }
-    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
-
     val today = LocalDate.now()
+    var currentMonth by remember { mutableStateOf(YearMonth.now()) }
+    var selectedDate by remember { mutableStateOf(today) }
+
+    // 切月后 selectedDate 可能还停留在另一个月，导致网格高亮的和下方清单显示的不是同一天。
+    // 这里把它夹回当前可见月份。
+    val effectiveSelectedDate = remember(selectedDate, currentMonth) {
+        if (YearMonth.from(selectedDate) == currentMonth) {
+            selectedDate
+        } else {
+            currentMonth.atDay(selectedDate.dayOfMonth.coerceAtMost(currentMonth.lengthOfMonth()))
+        }
+    }
+
     val checkInsByDateAndHabit = remember(checkIns) {
         checkIns.associateBy { "${it.date}_${it.habitId}" }
     }
@@ -101,11 +113,16 @@ fun CalendarMonthView(
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
-                IconButton(onClick = { currentMonth = currentMonth.plusMonths(1) }) {
+                // 不允许翻到未来月份：未来日期没有「补打卡」的意义
+                IconButton(
+                    onClick = { currentMonth = currentMonth.plusMonths(1) },
+                    enabled = currentMonth < YearMonth.now()
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = "下一月",
-                        tint = MaterialTheme.colorScheme.onSurface
+                        tint = if (currentMonth < YearMonth.now()) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.outline
                     )
                 }
             }
@@ -145,21 +162,20 @@ fun CalendarMonthView(
                         if (dayNumber in 1..daysInMonth) {
                             val dateObj = currentMonth.atDay(dayNumber)
                             val dateStr = dateObj.format(DateTimeFormatter.ISO_LOCAL_DATE)
-                            val isSelected = dateObj == selectedDate
+                            val isSelected = dateObj == effectiveSelectedDate
                             val isToday = dateObj == today
+                            val isFuture = dateObj > today
 
                             // Check habits scheduled on this date
                             val scheduledHabits = habits.filter { habit ->
-                                isHabitScheduled(habit, dateObj)
+                                HabitSchedule.isScheduled(habit, dateObj)
                             }
                             val hasScheduled = scheduledHabits.isNotEmpty()
                             val completedHabits = scheduledHabits.filter { habit ->
-                                val checkIn = checkInsByDateAndHabit["${dateStr}_${habit.id}"]
-                                if (habit.isCounter) {
-                                    (checkIn?.count ?: 0) >= habit.targetCount
-                                } else {
-                                    checkIn?.isCompleted == true || (checkIn?.count ?: 0) > 0
-                                }
+                                HabitSchedule.isCompleted(
+                                    habit,
+                                    checkInsByDateAndHabit["${dateStr}_${habit.id}"]
+                                )
                             }
                             val isAllCompleted = hasScheduled && completedHabits.size == scheduledHabits.size
 
@@ -176,7 +192,7 @@ fun CalendarMonthView(
                                             else -> Color.Transparent
                                         }
                                     )
-                                    .clickable { selectedDate = dateObj },
+                                    .clickable(enabled = !isFuture) { selectedDate = dateObj },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(
@@ -187,7 +203,11 @@ fun CalendarMonthView(
                                         text = "$dayNumber",
                                         fontSize = 12.sp,
                                         fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                        color = when {
+                                            isFuture -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                                            isSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+                                            else -> MaterialTheme.colorScheme.onSurface
+                                        }
                                     )
 
                                     if (hasScheduled) {
@@ -222,15 +242,25 @@ fun CalendarMonthView(
             Spacer(modifier = Modifier.height(16.dp))
 
             // Below Calendar: Selected day plans checklist
-            val selectedDateStr = selectedDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val selectedDayHabits = habits.filter { isHabitScheduled(it, selectedDate) }
+            val selectedDateStr = effectiveSelectedDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+            val selectedDayHabits = habits.filter { HabitSchedule.isScheduled(it, effectiveSelectedDate) }
+            val selectedIsFuture = effectiveSelectedDate > today
 
             Text(
-                text = "${selectedDate.year}年${selectedDate.monthValue}月${selectedDate.dayOfMonth}日 计划清单 (${selectedDayHabits.size} 项)",
+                text = "${effectiveSelectedDate.year}年${effectiveSelectedDate.monthValue}月${effectiveSelectedDate.dayOfMonth}日 计划清单 (${selectedDayHabits.size} 项)",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
+
+            if (selectedIsFuture) {
+                Text(
+                    text = "未来日期暂不可打卡",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -245,26 +275,71 @@ fun CalendarMonthView(
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     selectedDayHabits.forEach { habit ->
                         val checkIn = checkInsByDateAndHabit["${selectedDateStr}_${habit.id}"]
-                        val isDone = if (habit.isCounter) {
-                            (checkIn?.count ?: 0) >= habit.targetCount
-                        } else {
-                            checkIn?.isCompleted == true || (checkIn?.count ?: 0) > 0
-                        }
+                        val isDone = HabitSchedule.isCompleted(habit, checkIn)
+                        val count = HabitSchedule.currentCount(checkIn)
+                        val target = HabitSchedule.effectiveTarget(habit)
 
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-                                .clickable { onToggleCheckIn(habit.id, selectedDateStr) }
+                                .then(
+                                    if (selectedIsFuture) Modifier
+                                    else Modifier.clickable {
+                                        if (habit.isCounter) {
+                                            if (count < target) onIncrement(habit.id, selectedDateStr) else onDecrement(habit.id, selectedDateStr)
+                                        } else {
+                                            onToggleCheckIn(habit.id, selectedDateStr)
+                                        }
+                                    }
+                                )
                                 .padding(horizontal = 8.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Checkbox(
-                                checked = isDone,
-                                onCheckedChange = { onToggleCheckIn(habit.id, selectedDateStr) },
-                                colors = CheckboxDefaults.colors(checkedColor = Color(0xFF10B981))
-                            )
+                            if (habit.isCounter) {
+                                IconButton(
+                                    onClick = { onDecrement(habit.id, selectedDateStr) },
+                                    enabled = !selectedIsFuture && count > 0,
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Remove,
+                                        contentDescription = "减一次",
+                                        tint = if (!selectedIsFuture && count > 0) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "$count/$target",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isDone) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurface
+                                )
+                                IconButton(
+                                    onClick = { onIncrement(habit.id, selectedDateStr) },
+                                    enabled = !selectedIsFuture && count < target,
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Add,
+                                        contentDescription = "加一次",
+                                        tint = if (!selectedIsFuture && count < target) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            } else {
+                                Checkbox(
+                                    checked = isDone,
+                                    onCheckedChange = {
+                                        if (!selectedIsFuture) onToggleCheckIn(habit.id, selectedDateStr)
+                                    },
+                                    enabled = !selectedIsFuture,
+                                    colors = CheckboxDefaults.colors(checkedColor = Color(0xFF10B981))
+                                )
+                            }
 
                             Spacer(modifier = Modifier.width(4.dp))
 
@@ -278,9 +353,8 @@ fun CalendarMonthView(
                                 )
 
                                 if (habit.isCounter) {
-                                    val currentCount = checkIn?.count ?: 0
                                     Text(
-                                        text = "计数: $currentCount / ${habit.targetCount} ${habit.unit}",
+                                        text = "目标: $target ${habit.unit}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 11.sp
@@ -292,38 +366,5 @@ fun CalendarMonthView(
                 }
             }
         }
-    }
-}
-
-/**
- * 计划排期判定 (支持单日、每日、每周多选、每月固定日、每N天)
- */
-private fun isHabitScheduled(habit: Habit, date: LocalDate): Boolean {
-    val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
-    val start = habit.startDate
-    if (start.isNotBlank() && dateStr < start) return false
-    val end = habit.endDate
-    if (!end.isNullOrBlank() && dateStr > end) return false
-
-    return when (habit.recurrenceType) {
-        "none" -> dateStr == start
-        "daily" -> true
-        "weekly" -> {
-            val daysList = habit.weeklyDays?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: emptyList()
-            // 1=Mon, 7=Sun
-            daysList.contains(date.dayOfWeek.value)
-        }
-        "monthly" -> {
-            val monthlyList = habit.monthlyDays?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: emptyList()
-            monthlyList.contains(date.dayOfMonth)
-        }
-        "interval" -> {
-            val interval = if (habit.intervalDays > 0) habit.intervalDays else 1
-            if (start.isBlank()) return true
-            val startObj = LocalDate.parse(start)
-            val diff = java.time.temporal.ChronoUnit.DAYS.between(startObj, date)
-            diff >= 0 && diff % interval == 0L
-        }
-        else -> true
     }
 }

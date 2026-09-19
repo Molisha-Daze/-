@@ -55,7 +55,7 @@ fun HistoryScreen(
     modifier: Modifier = Modifier
 ) {
     val habits by viewModel.allHabits.collectAsState()
-    val allCheckIns by viewModel.allCheckIns.collectAsState(initial = emptyList())
+    val allCheckIns by viewModel.allCheckIns.collectAsState()
     val historyRecords by viewModel.historyRecords.collectAsState()
     var selectedPhotoPath by remember { mutableStateOf<String?>(null) }
 
@@ -80,6 +80,12 @@ fun HistoryScreen(
                 checkIns = allCheckIns,
                 onToggleCheckIn = { habitId, date ->
                     viewModel.toggleCheckIn(habitId, date)
+                },
+                onIncrement = { habitId, date ->
+                    viewModel.incrementCheckIn(habitId, date)
+                },
+                onDecrement = { habitId, date ->
+                    viewModel.decrementCheckIn(habitId, date)
                 }
             )
         }

@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.habittracker.data.dao.CheckInWithHabit
+import com.example.habittracker.data.entity.CheckIn
 import com.example.habittracker.data.entity.Habit
 import com.example.habittracker.data.repository.HabitRepository
 import com.example.habittracker.model.DayProgress
@@ -14,12 +15,37 @@ import com.example.habittracker.util.DateUtils
 import com.example.habittracker.util.ImageStorageManager
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class HabitViewModel(private val repository: HabitRepository) : ViewModel() {
 
+    /** 全部活跃习惯（含今天没排期的），供「习惯管理」页使用。 */
     val habitsWithStats: StateFlow<List<HabitWithStats>> = repository.habitsWithStats
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    /** 今天真正有排期的习惯，供「今日打卡」页使用。 */
+    val todayHabits: StateFlow<List<HabitWithStats>> = repository.habitsWithStats
+        .map { list -> list.filter { it.scheduledToday } }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val allHabits: StateFlow<List<Habit>> = repository.allHabits
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val allCheckIns: StateFlow<List<CheckIn>> = repository.allCheckIns
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -40,9 +66,23 @@ class HabitViewModel(private val repository: HabitRepository) : ViewModel() {
             initialValue = emptyList()
         )
 
-    fun toggleCheckIn(habitId: Long) {
+    fun toggleCheckIn(habitId: Long, date: String = DateUtils.today()) {
         viewModelScope.launch {
-            repository.toggleCheckIn(habitId, DateUtils.today())
+            repository.toggleCheckIn(habitId, date)
+        }
+    }
+
+    /** 计数器习惯 +1 */
+    fun incrementCheckIn(habitId: Long, date: String = DateUtils.today()) {
+        viewModelScope.launch {
+            repository.incrementCheckIn(habitId, date)
+        }
+    }
+
+    /** 计数器习惯 -1 */
+    fun decrementCheckIn(habitId: Long, date: String = DateUtils.today()) {
+        viewModelScope.launch {
+            repository.decrementCheckIn(habitId, date)
         }
     }
 
@@ -70,23 +110,10 @@ class HabitViewModel(private val repository: HabitRepository) : ViewModel() {
         }
     }
 
-    fun addHabit(
-        name: String,
-        iconName: String,
-        colorHex: String,
-        reminderTime: String?
-    ) {
+    fun addHabit(habit: Habit) {
         viewModelScope.launch {
-            val currentList = habitsWithStats.value
-            val nextOrder = currentList.size
-            val habit = Habit(
-                name = name.trim(),
-                iconName = iconName,
-                colorHex = colorHex,
-                reminderTime = reminderTime,
-                sortOrder = nextOrder
-            )
-            repository.addHabit(habit)
+            val nextOrder = habitsWithStats.value.size
+            repository.addHabit(habit.copy(sortOrder = nextOrder))
         }
     }
 
