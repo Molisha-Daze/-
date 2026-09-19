@@ -1,5 +1,7 @@
 package com.example.habittracker.util
 
+import com.example.habittracker.data.entity.CheckIn
+import com.example.habittracker.data.entity.Habit
 import java.time.LocalDate
 
 data class StreakResult(
@@ -9,91 +11,71 @@ data class StreakResult(
 
 object StreakCalculator {
 
+    /** 回溯窗口上限，避免对极老数据无限回溯 */
+    private const val DEFAULT_HISTORY_WINDOW_DAYS = 730L
+
     /**
-     * Calculates current and longest streaks based on local natural days (midnight boundary).
-     * @param checkInDates set of unique "yyyy-MM-dd" date strings for a habit
-     * @param referenceToday today's date in the user's local timezone
+     * 按「有排期的日期」计算连续打卡，而不是按自然日。
+     *
+     * 这是与新增的每周 / 每月 / 每 N 天 / 单次排期配套的关键改动：
+     * - 「每周一三五」的习惯，周一、周三都完成 → 连续 2 次，周二没打卡不再把它打断
+     * - 「每周一」的习惯，周二查看时仍显示连续 1 次，而不是归零
+     * - 「每月 15 号」不再因为中间 29 天没有打卡而永远显示 0
+     *
+     * @param checkInsByDate 该习惯的全部打卡记录，按 "yyyy-MM-dd" 索引
+     * @param referenceToday 参照「今天」，用于判定今天是否还算宽限期内
      */
     fun calculate(
-        checkInDates: Set<String>,
-        referenceToday: LocalDate = DateUtils.todayDate()
+        habit: Habit,
+        checkInsByDate: Map<String, CheckIn>,
+        referenceToday: LocalDate = DateUtils.todayDate(),
+        historyWindowDays: Long = DEFAULT_HISTORY_WINDOW_DAYS
     ): StreakResult {
-        if (checkInDates.isEmpty()) {
-            return StreakResult(currentStreak = 0, longestStreak = 0)
-        }
+        if (checkInsByDate.isEmpty()) return StreakResult(0, 0)
 
-        // Convert and sort all dates.
-        // 必须剔除未来日期：一旦写入「提前完成」的记录，longestStreak 会把未来那一段
-        // 也算进去，产出「连续打卡 47 天」这种荒谬数据。
-        val localDates = checkInDates
-            .mapNotNull {
-                try {
-                    DateUtils.parseDate(it)
-                } catch (e: Exception) {
-                    null
-                }
+        // 回溯起点：窗口上限、最早一次打卡、习惯开始日期，三者取最早
+        val windowStart = listOfNotNull(
+            referenceToday.minusDays(historyWindowDays),
+            checkInsByDate.keys.mapNotNull { runCatching { DateUtils.parseDate(it) }.getOrNull() }.minOrNull(),
+            habit.startDate.takeIf { it.isNotBlank() }
+                ?.let { runCatching { DateUtils.parseDate(it) }.getOrNull() }
+        ).min()
+
+        // 只收集「有排期」的日期。未来日期一律排除，避免提前打卡污染统计。
+        val scheduled = buildList {
+            var cursor = windowStart
+            while (!cursor.isAfter(referenceToday)) {
+                if (HabitSchedule.isScheduled(habit, cursor)) add(cursor)
+                cursor = cursor.plusDays(1)
             }
-            .filter { it <= referenceToday }
-            .distinct()
-            .sorted()
-
-        if (localDates.isEmpty()) {
-            return StreakResult(currentStreak = 0, longestStreak = 0)
         }
+        if (scheduled.isEmpty()) return StreakResult(0, 0)
 
-        // Calculate Longest Streak
-        var maxStreak = 1
-        var tempStreak = 1
-        for (i in 1 until localDates.size) {
-            val prev = localDates[i - 1]
-            val curr = localDates[i]
-            if (curr == prev.plusDays(1)) {
-                tempStreak++
-                if (tempStreak > maxStreak) {
-                    maxStreak = tempStreak
-                }
-            } else if (curr != prev) {
-                tempStreak = 1
+        fun isDone(date: LocalDate): Boolean =
+            HabitSchedule.isCompleted(habit, checkInsByDate[DateUtils.formatDate(date)])
+
+        // 最长连续：按排期日期顺序跑一遍
+        var longest = 0
+        var run = 0
+        for (d in scheduled) {
+            if (isDone(d)) {
+                run++
+                if (run > longest) longest = run
+            } else {
+                run = 0
             }
         }
 
-        // Calculate Current Streak
-        val todayStr = DateUtils.formatDate(referenceToday)
-        val yesterdayStr = DateUtils.formatDate(referenceToday.minusDays(1))
-
-        val isCheckedToday = checkInDates.contains(todayStr)
-        val isCheckedYesterday = checkInDates.contains(yesterdayStr)
-
-        val currentStreak = when {
-            isCheckedToday -> {
-                // Count backwards from today
-                var count = 0
-                var checkDate = referenceToday
-                while (checkInDates.contains(DateUtils.formatDate(checkDate))) {
-                    count++
-                    checkDate = checkDate.minusDays(1)
-                }
-                count
-            }
-            isCheckedYesterday -> {
-                // Today not yet checked in, but streak is still intact from yesterday
-                var count = 0
-                var checkDate = referenceToday.minusDays(1)
-                while (checkInDates.contains(DateUtils.formatDate(checkDate))) {
-                    count++
-                    checkDate = checkDate.minusDays(1)
-                }
-                count
-            }
-            else -> {
-                // Neither today nor yesterday was checked in -> streak is broken, resets to 0
-                0
-            }
+        // 当前连续：从最近一次排期往前数。
+        // 若最后一次排期就是今天且尚未完成，今天还没过完，不算断签，从更早一次继续往前数。
+        var current = 0
+        var idx = scheduled.size - 1
+        if (idx >= 0 && scheduled[idx] == referenceToday && !isDone(referenceToday)) idx--
+        while (idx >= 0 && isDone(scheduled[idx])) {
+            current++
+            idx--
         }
 
-        return StreakResult(
-            currentStreak = currentStreak,
-            longestStreak = maxOf(maxStreak, currentStreak)
-        )
+        return StreakResult(current, maxOf(longest, current))
     }
 }

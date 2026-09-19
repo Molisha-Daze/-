@@ -38,6 +38,15 @@ class CheckInActionReceiver : BroadcastReceiver() {
                     }
 
                     val today = DateUtils.today()
+                    val todayDate = DateUtils.todayDate()
+
+                    // 今天没有排期：可能是用户刚改过排期，也可能是旧闹钟重放的 Action。
+                    // 这种情况下绝不能写库，直接把残留通知撤掉。
+                    if (!HabitSchedule.isScheduled(habit, todayDate)) {
+                        NotificationHelper.cancelNotification(context, habitId)
+                        return@launch
+                    }
+
                     val existing = db.checkInDao().getCheckIn(habitId, today)
                     val target = if (habit.isCounter) HabitSchedule.effectiveTarget(habit) else 1
 

@@ -58,6 +58,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,10 +68,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.example.habittracker.data.entity.Habit
 import com.example.habittracker.notification.NotificationHelper
 import com.example.habittracker.util.DateUtils
@@ -151,6 +155,25 @@ fun AddEditHabitDialog(
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { _ -> }
+
+    val exactAlarmSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        // 从系统精确定时设置页返回后才刷新，避免「系统未允许精确提醒」的提示滞留
+        exactAlarmAvailable = NotificationHelper.canScheduleExactAlarms(context)
+    }
+
+    // 兜底：用户通过其他路径切走再回来（例如从最近任务切回）时也刷新一次
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                exactAlarmAvailable = NotificationHelper.canScheduleExactAlarms(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -532,14 +555,14 @@ fun AddEditHabitDialog(
                         )
                         TextButton(onClick = {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                context.startActivity(
+                                // 必须走 Activity Result：等用户从系统设置返回后再查询，
+                                // 而不是 startActivity 之后立刻查询（那样查到的还是旧状态）
+                                exactAlarmSettingsLauncher.launch(
                                     Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
                                         data = Uri.parse("package:${context.packageName}")
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                     }
                                 )
                             }
-                            exactAlarmAvailable = NotificationHelper.canScheduleExactAlarms(context)
                         }) {
                             Text("去设置")
                         }

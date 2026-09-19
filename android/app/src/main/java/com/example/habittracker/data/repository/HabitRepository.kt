@@ -44,10 +44,11 @@ class HabitRepository(private val context: Context) {
 
         habits.map { habit ->
             val habitCheckIns = checkInsByHabit[habit.id] ?: emptyList()
-            val dateSet = habitCheckIns.map { it.date }.toSet()
-            val todayCheckIn = habitCheckIns.firstOrNull { it.date == todayStr }
+            val checkInsByDate = habitCheckIns.associateBy { it.date }
+            val todayCheckIn = checkInsByDate[todayStr]
 
-            val streak = StreakCalculator.calculate(dateSet, todayDate)
+            // 连续打卡按「有排期的日期」计算，周计划 / 月计划 / 间隔计划才不会被没排期的日子打断
+            val streak = StreakCalculator.calculate(habit, checkInsByDate, todayDate)
 
             HabitWithStats(
                 habit = habit,
@@ -136,8 +137,8 @@ class HabitRepository(private val context: Context) {
      * @return 操作后是否处于「已完成」状态；未来日期或习惯不存在时返回 null。
      */
     suspend fun toggleCheckIn(habitId: Long, date: String = DateUtils.today()): Boolean? {
-        if (!isWritableDate(date)) return null
         val habit = habitDao.getHabitById(habitId) ?: return null
+        if (!canWrite(habit, date)) return null
         if (habit.isCounter) {
             val existing = checkInDao.getCheckIn(habitId, date)
             return if (existing != null && existing.count >= HabitSchedule.effectiveTarget(habit)) {
@@ -176,8 +177,8 @@ class HabitRepository(private val context: Context) {
      * @return 操作后的当前次数；未来日期或习惯不存在时返回 null。
      */
     suspend fun incrementCheckIn(habitId: Long, date: String = DateUtils.today()): Int? {
-        if (!isWritableDate(date)) return null
         val habit = habitDao.getHabitById(habitId) ?: return null
+        if (!canWrite(habit, date)) return null
 
         val target = HabitSchedule.effectiveTarget(habit)
         val existing = checkInDao.getCheckIn(habitId, date)
@@ -205,8 +206,8 @@ class HabitRepository(private val context: Context) {
      * @return 操作后的当前次数；未来日期或习惯不存在时返回 null。
      */
     suspend fun decrementCheckIn(habitId: Long, date: String = DateUtils.today()): Int? {
-        if (!isWritableDate(date)) return null
         val habit = habitDao.getHabitById(habitId) ?: return null
+        if (!canWrite(habit, date)) return null
 
         val existing = checkInDao.getCheckIn(habitId, date) ?: return 0
         val next = (existing.count - 1).coerceAtLeast(0)
@@ -223,7 +224,8 @@ class HabitRepository(private val context: Context) {
     }
 
     suspend fun attachPhoto(habitId: Long, date: String, photoPath: String) {
-        if (!isWritableDate(date)) return
+        val habit = habitDao.getHabitById(habitId) ?: return
+        if (!canWrite(habit, date)) return
         val existing = checkInDao.getCheckIn(habitId, date)
         if (existing != null) {
             // Remove previous photo if different
@@ -252,6 +254,12 @@ class HabitRepository(private val context: Context) {
         }
     }
 
-    /** 不允许为未来日期写入打卡记录——这是数据层的最后一道防线。 */
-    private fun isWritableDate(date: String): Boolean = date <= DateUtils.today()
+    /**
+     * 写入打卡记录的前置校验：
+     * 1. 不得是未来日期
+     * 2. 该日期必须在习惯的排期内——否则改了排期后，残留的通知 Action 或历史界面
+     *    仍能在不该执行的日期写入完成记录
+     */
+    private fun canWrite(habit: Habit, date: String): Boolean =
+        date <= DateUtils.today() && HabitSchedule.isScheduled(habit, date)
 }

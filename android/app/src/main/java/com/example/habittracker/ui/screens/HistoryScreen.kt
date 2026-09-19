@@ -43,6 +43,7 @@ import com.example.habittracker.ui.components.CalendarMonthView
 import com.example.habittracker.ui.components.EmptyState
 import com.example.habittracker.ui.components.PhotoViewerDialog
 import com.example.habittracker.ui.components.getIconVector
+import com.example.habittracker.ui.components.parseColorSafe
 import com.example.habittracker.viewmodel.HabitViewModel
 import java.io.File
 import java.text.SimpleDateFormat
@@ -115,11 +116,12 @@ fun HistoryScreen(
             ) { record ->
                 val checkIn = record.checkIn
                 val habit = record.habit
-                val habitColor = try {
-                    habit?.colorHex?.let { Color(android.graphics.Color.parseColor(it)) } ?: MaterialTheme.colorScheme.primary
-                } catch (e: Exception) {
+                // 注意：Composable 作用域内不允许用 try/catch 包裹 Composable 调用
+                // （MaterialTheme.colorScheme 本身是 @Composable），所以解析逻辑放在普通函数里
+                val habitColor = parseColorSafe(
+                    habit?.colorHex ?: "",
                     MaterialTheme.colorScheme.primary
-                }
+                )
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),

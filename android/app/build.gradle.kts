@@ -48,6 +48,12 @@ android {
     }
 }
 
+// Room schema 导出目录。exportSchema=true 必须配这个参数，
+// 导出的 JSON 要纳入版本管理，供以后编写 Migration 时比对。
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -68,4 +74,6 @@ dependencies {
 
     // Image loading with Coil
     implementation(libs.coil.compose)
+
+    testImplementation(libs.junit)
 }
