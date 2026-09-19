@@ -11,19 +11,27 @@ data class StreakResult(
 
 object StreakCalculator {
 
-    /** 回溯窗口上限，避免对极老数据无限回溯 */
-    private const val DEFAULT_HISTORY_WINDOW_DAYS = 730L
+    /**
+     * 回溯窗口上限（天）。默认 10 年，即最多逐日遍历约 3650 天。
+     *
+     * 这是**真正的**上限：扫描起点不会早于 [referenceToday] 减去该值，
+     * 因此开销恒定有界，不会随习惯使用年限增长而膨胀。
+     * 代价是超过 10 年的更早历史不计入统计——对自用习惯工具而言这个取舍是合理的，
+     * 且比「注释说有上限、实际无界」要诚实得多。
+     */
+    const val DEFAULT_HISTORY_WINDOW_DAYS = 3650L
 
     /**
      * 按「有排期的日期」计算连续打卡，而不是按自然日。
      *
-     * 这是与新增的每周 / 每月 / 每 N 天 / 单次排期配套的关键改动：
+     * 这是与每周 / 每月 / 每 N 天 / 单次排期配套的关键改动：
      * - 「每周一三五」的习惯，周一、周三都完成 → 连续 2 次，周二没打卡不再把它打断
-     * - 「每周一」的习惯，周二查看时仍显示连续 1 次，而不是归零
+     * - 「每周一」的习惯，周四查看时仍显示连续 1 次，而不是归零
      * - 「每月 15 号」不再因为中间 29 天没有打卡而永远显示 0
      *
      * @param checkInsByDate 该习惯的全部打卡记录，按 "yyyy-MM-dd" 索引
      * @param referenceToday 参照「今天」，用于判定今天是否还算宽限期内
+     * @param historyWindowDays 回溯窗口上限（天），保证遍历量有界
      */
     fun calculate(
         habit: Habit,
@@ -33,19 +41,33 @@ object StreakCalculator {
     ): StreakResult {
         if (checkInsByDate.isEmpty()) return StreakResult(0, 0)
 
-        // 回溯起点：窗口上限、最早一次打卡、习惯开始日期，三者取最早
-        val windowStart = listOfNotNull(
+        val earliestCheckIn = checkInsByDate.keys
+            .mapNotNull { runCatching { DateUtils.parseDate(it) }.getOrNull() }
+            .minOrNull()
+        val startDate = habit.startDate.takeIf { it.isNotBlank() }
+            ?.let { runCatching { DateUtils.parseDate(it) }.getOrNull() }
+
+        // 三个候选起点取【最晚】的那个：
+        // 1. 窗口下界 —— 这是硬性上限，保证扫描天数不超过 historyWindowDays
+        // 2. 习惯开始日期 —— 更早的日期根本没有排期，跳过不影响任何结果
+        // 3. 最早一次打卡 —— 更早的日期没有完成记录，不可能延长任何连续段
+        //
+        // 注意：必须是 max 而不是 min。取 min 会让「开始于 2018 年」这类老习惯
+        // 一路扫到 2018 年，窗口形同虚设（这正是这里此前的行为）。
+        val scanStart = listOfNotNull(
             referenceToday.minusDays(historyWindowDays),
-            checkInsByDate.keys.mapNotNull { runCatching { DateUtils.parseDate(it) }.getOrNull() }.minOrNull(),
-            habit.startDate.takeIf { it.isNotBlank() }
-                ?.let { runCatching { DateUtils.parseDate(it) }.getOrNull() }
-        ).min()
+            earliestCheckIn,
+            startDate
+        ).max()
+
+        // 排期判定预解析一次，避免逐日重复 split 字符串
+        val matcher = HabitSchedule.of(habit)
 
         // 只收集「有排期」的日期。未来日期一律排除，避免提前打卡污染统计。
         val scheduled = buildList {
-            var cursor = windowStart
+            var cursor = scanStart
             while (!cursor.isAfter(referenceToday)) {
-                if (HabitSchedule.isScheduled(habit, cursor)) add(cursor)
+                if (matcher.matches(cursor)) add(cursor)
                 cursor = cursor.plusDays(1)
             }
         }

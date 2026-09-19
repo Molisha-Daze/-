@@ -15,6 +15,10 @@ import java.time.LocalDate
  */
 class StreakCalculatorTest {
 
+    /** 生成 2026-09-{range} 的日期串数组 */
+    private fun september(range: IntRange): Array<String> =
+        range.map { String.format("2026-09-%02d", it) }.toTypedArray()
+
     private fun checkInsOn(vararg dates: String): Map<String, CheckIn> =
         dates.associateWith { CheckIn(habitId = 1, date = it, isCompleted = true) }
 
@@ -61,6 +65,46 @@ class StreakCalculatorTest {
             referenceToday = LocalDate.of(2026, 9, 17) // 周四，离周一已过 3 天
         )
         assertEquals(1, result.currentStreak)
+    }
+
+    /** 回溯窗口必须真的生效：窗口调小后，统计结果应被截断 */
+    @Test
+    fun historyWindowActuallyBoundsTheScan() {
+        val habit = daily("2026-09-01")
+        val checkIns = checkInsOn(*september(1..17))
+        val today = LocalDate.of(2026, 9, 17)
+
+        // 默认窗口（10 年）足够大：17 天全部计入
+        assertEquals(17, StreakCalculator.calculate(habit, checkIns, today).currentStreak)
+
+        // 窗口只有 5 天：只能从 09-12 数起，共 6 天
+        assertEquals(
+            6,
+            StreakCalculator.calculate(habit, checkIns, today, historyWindowDays = 5).currentStreak
+        )
+    }
+
+    /**
+     * 报告场景：习惯开始于 2018 年，当前 2026 年。
+     * 旧的 min() 实现会把扫描起点拉到 2018 年（无界遍历）；
+     * 取 max() 后窗口才真正约束住起点。
+     */
+    @Test
+    fun oldStartDateDoesNotPullScanBackUnbounded() {
+        val habit = daily("2018-01-01")
+        val checkIns = checkInsOn(*september(1..17))
+        val today = LocalDate.of(2026, 9, 17)
+
+        // 窗口 5 天 → 只数 09-12 起的 6 天，而不是从 2018 年扫到今天
+        assertEquals(
+            6,
+            StreakCalculator.calculate(habit, checkIns, today, historyWindowDays = 5).currentStreak
+        )
+        // 默认窗口下结果为 17（只有最近 17 天有打卡，更早全是未完成的排期）
+        assertEquals(
+            17,
+            StreakCalculator.calculate(habit, checkIns, today).currentStreak
+        )
     }
 
     /** 起始日之前的打卡不在排期内，不计入连续 */
