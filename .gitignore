@@ -6,3 +6,15 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Gradle / Android 构建产物与缓存
+# android/.gradle 是机器与 Gradle 版本相关的缓存（checksums、dependencies-accessors、
+# .lock、.bin、.class、自动生成的 Java 源码），不同环境会持续改动，绝不能进仓库。
+.gradle/
+local.properties
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+*.iml
+.idea/
